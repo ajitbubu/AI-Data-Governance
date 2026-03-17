@@ -1,0 +1,58 @@
+sequenceDiagram
+    autonumber
+    participant U as Frontend Client
+    participant GW as Nginx Gateway
+    participant MW as Middleware Pipeline
+    participant R as Inventory Router
+    participant IS as Inventory Service
+    participant CE as Classification Engine
+    participant AW as Approval Workflow
+    participant DB as PostgreSQL
+    participant RD as Redis Cache
+    participant AL as Audit Logger
+
+    Note over U,AL: AI System Registration + Dual Classification Flow
+
+    U->>GW: POST /api/v1/systems (CreateSystemPayload)
+    GW->>GW: Rate limit check · TLS · Request ID
+    GW->>MW: Forward request
+    MW->>MW: JWT verify → RBAC check → Request log
+    MW->>R: Authenticated request + user context
+
+    R->>IS: register_system(payload, user_id)
+    
+    rect rgb(220, 240, 255)
+        Note over IS,CE: Step 1 — Dual Classification
+        IS->>CE: classify(system_metadata)
+        CE->>CE: _classify_eu(): Prohibited → High (Annex III) → Limited → Minimal
+        CE->>CE: _classify_us(): OMB M-25-21 category matching
+        CE->>CE: _compute_risk_score(): EU(40%) + US(25%) + Data(20%) + Auto(15%)
+        CE->>CE: _assess_confidence(): HIGH / MEDIUM / LOW
+        CE-->>IS: ClassificationResult(eu_tier, us_designation, score, confidence)
+    end
+
+    rect rgb(220, 255, 220)
+        Note over IS,DB: Step 2 — Persist with Versioning
+        IS->>DB: INSERT ai_systems (with classification fields)
+        IS->>DB: INSERT risk_classifications (rationale JSON)
+        IS->>DB: INSERT ai_system_versions (immutable v1 snapshot)
+    end
+
+    rect rgb(255, 235, 220)
+        Note over IS,AW: Step 3 — Conditional Approval Trigger
+        alt EU tier = HIGH or PROHIBITED
+            IS->>AW: create_workflow(system_id, trigger=REGISTRATION)
+            AW->>DB: INSERT approval_workflows (48h SLA)
+            AW->>RD: Cache pending approval count
+            AW-->>IS: workflow_id
+        end
+    end
+
+    IS->>AL: emit_event(SYSTEM_REGISTERED, system_id, classification)
+    AL->>DB: INSERT audit_events (immutable)
+
+    IS-->>R: AISystemResponse (with classification + workflow)
+    R-->>MW: 201 Created + JSON body
+    MW->>MW: Response log · Metrics emit · Trace complete
+    MW-->>GW: Response
+    GW-->>U: 201 Created + AISystemResponse

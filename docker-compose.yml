@@ -1,0 +1,162 @@
+version: "3.9"
+
+networks:
+  datasafeguard-net:
+    driver: bridge
+
+services:
+  # ── PostgreSQL ──
+  postgres:
+    image: postgres:16-alpine
+    container_name: datasafeguard-postgres
+    environment:
+      POSTGRES_USER: datasafeguard
+      POSTGRES_PASSWORD: datasafeguard
+      POSTGRES_DB: datasafeguard
+      POSTGRES_INITDB_ARGS: "-c max_connections=200 -c shared_buffers=256MB"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datasafeguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - datasafeguard-net
+
+  # ── Redis ──
+  redis:
+    image: redis:7-alpine
+    container_name: datasafeguard-redis
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - datasafeguard-net
+
+  # ── API Gateway (FastAPI) ──
+  api:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: datasafeguard-api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://datasafeguard:datasafeguard@postgres:5432/datasafeguard
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+      AUTH_DEV_BYPASS: "true"
+      RATE_LIMIT_PER_MINUTE: "60"
+      OTEL_ENABLED: "false"
+      DEBUG: "true"
+      CORS_ORIGINS: '["http://localhost:3000", "http://localhost"]'
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/api-gateway/app:/app/app  # Hot reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - datasafeguard-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Frontend (Next.js) ──
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    container_name: datasafeguard-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      HOSTNAME: "0.0.0.0"
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - datasafeguard-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', r => process.exit(r.statusCode >= 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── Nginx Reverse Proxy ──
+  nginx:
+    image: nginx:alpine
+    container_name: datasafeguard-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    networks:
+      - datasafeguard-net
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Prometheus (Optional - monitoring profile) ──
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: datasafeguard-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    networks:
+      - datasafeguard-net
+    profiles:
+      - monitoring
+
+  # ── Jaeger (Optional - monitoring profile) ──
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: datasafeguard-jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    networks:
+      - datasafeguard-net
+    profiles:
+      - monitoring
+
+volumes:
+  pgdata:
+  redisdata:
+  promdata:

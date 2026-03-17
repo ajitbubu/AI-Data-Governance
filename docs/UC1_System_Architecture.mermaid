@@ -1,0 +1,93 @@
+graph TB
+    subgraph CLIENT["Client Layer"]
+        direction LR
+        WEB["Next.js 14 App Router<br/>React 18 + TypeScript<br/>TanStack Query + Zustand"]
+        ADMIN["Admin Console<br/>(Future)"]
+    end
+
+    subgraph GATEWAY["API Gateway Layer"]
+        direction TB
+        NGINX["Nginx Reverse Proxy<br/>TLS Termination · Rate Limiting<br/>Request ID Injection"]
+        
+        subgraph MW["Middleware Pipeline"]
+            direction LR
+            CORS["CORS"]
+            AUTH["JWT Auth<br/>+ RBAC"]
+            LOG["Request<br/>Logger"]
+            ERR["Error<br/>Handler"]
+            TRACE["OpenTelemetry<br/>Tracer"]
+        end
+    end
+
+    subgraph API["FastAPI Application (api-gateway)"]
+        direction TB
+        subgraph ROUTES["Router Layer — /api/v1"]
+            direction LR
+            INV_R["Inventory Router<br/>12 endpoints"]
+            HEALTH_R["Health Router<br/>liveness · readiness"]
+            AUTH_R["Auth Router<br/>login · refresh · me"]
+        end
+
+        subgraph SERVICES["Service Layer — Business Logic"]
+            direction LR
+            INV_S["Inventory<br/>Service"]
+            CLASS_S["Classification<br/>Engine"]
+            APPROVAL_S["Approval<br/>Workflow"]
+            AUDIT_S["Audit<br/>Service"]
+        end
+
+        subgraph REPOS["Repository Layer — Data Access"]
+            direction LR
+            SYS_REPO["AISystem<br/>Repository"]
+            CLASS_REPO["Classification<br/>Repository"]
+            USER_REPO["User<br/>Repository"]
+            AUDIT_REPO["Audit<br/>Repository"]
+        end
+    end
+
+    subgraph DATA["Data Layer"]
+        direction LR
+        PG["PostgreSQL 16<br/>Primary OLTP<br/>Async SQLAlchemy 2.0<br/>+ asyncpg"]
+        REDIS["Redis 7<br/>Cache · Sessions<br/>Rate Limit Counters"]
+    end
+
+    subgraph OBSERVE["Observability Stack"]
+        direction LR
+        PROM["Prometheus<br/>Metrics"]
+        JAEGER["Jaeger<br/>Distributed Traces"]
+        LOGS["Structured JSON Logs<br/>via structlog"]
+    end
+
+    subgraph MIGRATION["Schema Management"]
+        ALEMBIC["Alembic<br/>Version-controlled<br/>DB Migrations"]
+    end
+
+    WEB -->|"HTTPS"| NGINX
+    ADMIN -->|"HTTPS"| NGINX
+    NGINX --> MW
+    MW --> ROUTES
+    ROUTES --> SERVICES
+    SERVICES --> REPOS
+    REPOS --> PG
+    SERVICES --> REDIS
+    INV_S --> CLASS_S
+    INV_S --> APPROVAL_S
+    INV_S --> AUDIT_S
+    ALEMBIC -.->|"manages schema"| PG
+    API -.->|"emits metrics"| PROM
+    API -.->|"emits spans"| JAEGER
+    API -.->|"emits logs"| LOGS
+
+    classDef client fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a5f
+    classDef gateway fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f
+    classDef api fill:#d1fae5,stroke:#059669,stroke-width:2px,color:#064e3b
+    classDef data fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+    classDef observe fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843
+    classDef migration fill:#e0e7ff,stroke:#4f46e5,stroke-width:2px,color:#3730a3
+
+    class WEB,ADMIN client
+    class NGINX,CORS,AUTH,LOG,ERR,TRACE gateway
+    class INV_R,HEALTH_R,AUTH_R,INV_S,CLASS_S,APPROVAL_S,AUDIT_S,SYS_REPO,CLASS_REPO,USER_REPO,AUDIT_REPO api
+    class PG,REDIS data
+    class PROM,JAEGER,LOGS observe
+    class ALEMBIC migration

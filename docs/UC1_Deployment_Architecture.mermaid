@@ -1,0 +1,63 @@
+graph TB
+    subgraph HOST["Host Machine / VM"]
+        subgraph DOCKER["Docker Compose Stack"]
+            direction TB
+            
+            subgraph PROXY["Reverse Proxy"]
+                NGINX["nginx:alpine<br/>Port 80 / 443<br/>TLS · Rate Limit · Gzip<br/>Request ID Header"]
+            end
+
+            subgraph APP["Application Tier"]
+                direction LR
+                API["api-gateway<br/>Python 3.12 + FastAPI<br/>Port 8000<br/>Gunicorn + Uvicorn Workers<br/>3 replicas via deploy"]
+                FRONTEND["frontend<br/>Node 20 + Next.js 14<br/>Port 3000<br/>SSR + Static Export"]
+            end
+
+            subgraph DATA["Data Tier"]
+                direction LR
+                PG["postgres:16-alpine<br/>Port 5432<br/>Volume: pgdata<br/>Health: pg_isready"]
+                REDIS["redis:7-alpine<br/>Port 6379<br/>Volume: redisdata<br/>Maxmemory: 256mb"]
+            end
+
+            subgraph OBSERVE["Observability Tier"]
+                direction LR
+                PROM["prometheus:latest<br/>Port 9090<br/>Scrape: api metrics"]
+                JAEGER["jaeger:latest<br/>Port 16686 UI<br/>Port 4317 OTLP"]
+            end
+
+            subgraph MIGRATE["Migration Runner"]
+                ALEMBIC["alembic-migrate<br/>Run once on startup<br/>alembic upgrade head"]
+            end
+        end
+
+        subgraph VOLUMES["Persistent Volumes"]
+            PGDATA["pgdata"]
+            REDISDATA["redisdata"]
+            PROMDATA["promdata"]
+        end
+    end
+
+    NGINX -->|"/api/*"| API
+    NGINX -->|"/*"| FRONTEND
+    API --> PG
+    API --> REDIS
+    API -.->|"OTLP gRPC"| JAEGER
+    API -.->|"/metrics"| PROM
+    ALEMBIC -->|"migrations"| PG
+    PG --- PGDATA
+    REDIS --- REDISDATA
+    PROM --- PROMDATA
+
+    classDef proxy fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f
+    classDef app fill:#d1fae5,stroke:#059669,stroke-width:2px,color:#064e3b
+    classDef data fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+    classDef observe fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843
+    classDef volume fill:#f3f4f6,stroke:#6b7280,stroke-width:1px,color:#374151
+    classDef migrate fill:#e0e7ff,stroke:#4f46e5,stroke-width:2px,color:#3730a3
+
+    class NGINX proxy
+    class API,FRONTEND app
+    class PG,REDIS data
+    class PROM,JAEGER observe
+    class PGDATA,REDISDATA,PROMDATA volume
+    class ALEMBIC migrate
