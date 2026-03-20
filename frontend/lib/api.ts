@@ -95,6 +95,38 @@ export interface CreateSystemPayload {
   metadata_extra?: Record<string, unknown>;
 }
 
+export interface AuditEvent {
+  id: string;
+  event_type: string;
+  entity_type: string;
+  entity_id: string;
+  actor_id: string | null;
+  actor_email: string | null;
+  action: string;
+  changes: { before?: Record<string, unknown>; after?: Record<string, unknown> } | null;
+  metadata: Record<string, unknown> | null;
+  ip_address: string;
+  request_id: string;
+  created_at: string;
+}
+
+export interface AuditEventListItem {
+  id: string;
+  event_type: string;
+  entity_type: string;
+  entity_id: string;
+  action: string;
+  actor_email: string | null;
+  created_at: string;
+}
+
+export interface AuditStats {
+  total_events: number;
+  by_event_type: Record<string, number>;
+  by_entity_type: Record<string, number>;
+  events_per_day: Array<{ date: string; count: number }>;
+}
+
 // ── API Functions ──
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
@@ -162,4 +194,17 @@ export const api = {
 
   getVersionHistory: (id: string) =>
     apiFetch<Array<{ id: string; version_number: number; snapshot: Record<string, unknown>; change_summary: string | null; created_at: string }>>(`/systems/${id}/history`),
+
+  // Audit
+  listAuditEvents: (params?: Record<string, string>) => {
+    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+    return apiFetch<PaginatedResponse<AuditEventListItem>>(`/audit/events${qs}`);
+  },
+
+  getAuditEvent: (id: string) => apiFetch<AuditEvent>(`/audit/events/${id}`),
+
+  getAuditStats: () => apiFetch<AuditStats>(`/audit/events/stats`),
+
+  getEntityTimeline: (entityType: string, entityId: string) =>
+    apiFetch<AuditEventListItem[]>(`/audit/events/timeline/${entityType}/${entityId}`),
 };

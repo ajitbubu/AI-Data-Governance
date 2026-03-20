@@ -35,7 +35,7 @@ class AuditEvent(Base):
 
     # Event classification
     event_type: Mapped[str] = mapped_column(
-        String(50), nullable=False, index=True
+        String(50), nullable=False
     )
     """
     Event type codes, e.g.:
@@ -82,7 +82,7 @@ class AuditEvent(Base):
     Null for non-update events.
     """
 
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    event_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
     """
     Event-specific metadata. Examples:
     - CLASSIFICATION_COMPLETED: {confidence: 0.95, rule_version: "1.0"}
@@ -102,7 +102,6 @@ class AuditEvent(Base):
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
-        index=True,
     )
     """When the event was recorded (server time, UTC)"""
 

@@ -20,7 +20,7 @@ import structlog
 
 from .config import get_settings
 from .models.database import engine, Base
-from .routers import inventory
+from .routers import inventory, audit
 from .middleware import (
     setup_logging,
     RequestContextMiddleware,
@@ -250,11 +250,16 @@ app.include_router(
     tags=["AI System Inventory", "Risk Classification", "Approvals"],
 )
 
+app.include_router(
+    audit.router,
+    prefix=settings.API_PREFIX,
+    tags=["Audit Trail"],
+)
+
 
 # Future UC routers will be added here:
 # app.include_router(crosswalk.router, prefix=settings.API_PREFIX)     # UC-2
 # app.include_router(security.router, prefix=settings.API_PREFIX)      # UC-3
-# app.include_router(audit.router, prefix=settings.API_PREFIX)         # UC-4
 # app.include_router(bias.router, prefix=settings.API_PREFIX)          # UC-5
 # app.include_router(training_data.router, prefix=settings.API_PREFIX) # UC-6
 # app.include_router(hitl.router, prefix=settings.API_PREFIX)          # UC-7
